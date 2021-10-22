@@ -40,12 +40,15 @@ class Player:
         self.num_units_in_turn = 0
         #self.player_bowl_snapshot = None
 
+    def calc_unit_points(self, flavor_cell, flavor_preference):
+        preference_idx = flavor_preference.index(flavor_cell)
+        preference_score = len(self.flavor_preference) - preference_idx
+        return preference_score
+
     def calc_flavor_points(self, flavors_scooped, flavor_preference):
         total = 0
         for flavor_cell in flavors_scooped:
-            preference_idx = flavor_preference.index(flavor_cell)
-            preference_score = len(self.flavor_preference) - preference_idx
-            total += preference_score
+            total += self.calc_unit_points(flavor_cell, flavor_preference)
         return total
 
     def calc_scoop_points(self, i, j, curr_level, top_layer, flavor_preference):
@@ -88,10 +91,50 @@ class Player:
         total_each_flavor = self.get_all_flavors_unseen(top_layer, get_served)
         return self.flavors_left(total_each_flavor, get_flavors)
 
+    def calculate_expected_value_of_unk(self, flavors_left, preferences):
+        total_cells_left = sum([val for key,val in flavors_left.items()])
+        total_value = 0
+        for flavor in flavors_left:
+            total_value += (self.calc_unit_points(flavor, preferences) * flavors_left[flavor])
+        return total_value / total_cells_left
+
+    def simulate_scoop(self, top_layer, curr_level, expected_val, scoop):
+        i, j = scoop
+        max_level = max(curr_level[i, j], curr_level[i, j + 1], curr_level[i + 1, j], curr_level[i + 1, j + 1])
+        for i_offset in range(2):
+            for j_offset in range(2):
+                current_level = curr_level[i + i_offset, j + j_offset]
+                if current_level >= 0 and current_level == max_level:
+                    curr_level[i + i_offset, j + j_offset] = current_level - 1
+                    top_layer[i + i_offset, j + j_offset] = expected_val
+
+    def find_max_two_scoops(self, top_layer, curr_level, flavor_preference, max_scoop_size, flavors_left):
+        max_scoops = {}
+        max_two_scoop = 0
+        max_scoop_limit = 0
+        expected_value = self.calculate_expected_value_of_unk(flavors_left, self.flavor_preference)
+        for scoop_limit in range(1, min(5, max_scoop_size+1)):
+            first_scoop_loc, first_scoop_points, first_scoop_units = self.find_max_scoop(top_layer, curr_level, flavor_preference, scoop_limit, divide_by_scoop_size=True)
+            top_layer_copy = np.copy(top_layer)
+            curr_level_copy = np.copy(curr_level)
+            self.simulate_scoop(top_layer_copy, curr_level_copy, expected_value, first_scoop_loc)
+
+            second_scoop_loc, second_scoop_points, second_scoop_units = self.find_max_scoop(top_layer_copy, curr_level_copy, flavor_preference,
+                                                                        scoop_limit - first_scoop_units, divide_by_scoop_size=True)
+            total_both_scoops = first_scoop_points + second_scoop_points
+            max_scoops[scoop_limit] = total_both_scoops / (first_scoop_units + second_scoop_units)
+
+            if max_scoops[scoop_limit] > max_two_scoop:
+                max_two_scoop = total_both_scoops
+                max_scoop_limit = scoop_limit
+        return self.find_max_scoop(top_layer, curr_level, flavor_preference,
+                                    max_scoop_limit, divide_by_scoop_size=True)
+
     def find_max_scoop(self, top_layer, curr_level, flavor_preference, max_scoop_size, divide_by_scoop_size=True):
         max_scoop_loc = (0, 0)
         max_scoop_points_per_unit = 0
         max_scoop_points = 0
+        num_units_scooped = 0
         for i in range(len(top_layer) - 1):
             for j in range(len(top_layer[0]) - 1):
                 scoop_points, scoop_size = self.calc_scoop_points(i, j, curr_level, top_layer, flavor_preference)
@@ -103,16 +146,19 @@ class Player:
                             if scoop_points > max_scoop_points:
                                 max_scoop_loc = (i, j)
                                 max_scoop_points = scoop_points
+                                num_units_scooped = scoop_size
                         elif scoop_points_per_unit > max_scoop_points_per_unit:
                             max_scoop_loc = (i, j)
                             max_scoop_points = scoop_points
                             max_scoop_points_per_unit = scoop_points_per_unit
+                            num_units_scooped = scoop_size
                     else:
                         if scoop_points > max_scoop_points:
                             max_scoop_loc = (i, j)
                             max_scoop_points = scoop_points
+                            num_units_scooped = scoop_size
 
-        return max_scoop_loc, max_scoop_points
+        return max_scoop_loc, max_scoop_points, num_units_scooped
 
     def get_player_approximate_fav(self, player_count, served) -> List[int]:
         player_approximate_fav = [0 for i in range(player_count)]
@@ -217,7 +263,12 @@ class Player:
             #print("top layer was :", self.get_top_layer_flavour_count(top_layer))
         else:
             action = "scoop"
-            values, points = self.find_max_scoop(top_layer, curr_level, self.flavor_preference, 24 - self.num_units_in_turn, divide_by_scoop_size=True)
+            if self.num_units_in_turn <=16:
+                values, points, units = self.find_max_scoop(top_layer, curr_level, self.flavor_preference, 24 - self.num_units_in_turn, divide_by_scoop_size=True)
+            else:
+                values, points, units = self.find_max_two_scoops(top_layer, curr_level, self.flavor_preference,
+                                                                 24 - self.num_units_in_turn,
+                                                                 self.get_flavors_left_underneath(top_layer, get_served, get_flavors))
 
             #If no scoop was found, pass it
             if points == 0:

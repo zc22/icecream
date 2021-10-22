@@ -106,7 +106,7 @@ class Player:
                 current_level = curr_level[i + i_offset, j + j_offset]
                 if current_level >= 0 and current_level == max_level:
                     curr_level[i + i_offset, j + j_offset] = current_level - 1
-                    top_layer[i + i_offset, j + j_offset] = expected_val
+                    top_layer[i + i_offset, j + j_offset] = self.flavor_preference[len(self.flavor_preference) - int(expected_val)]
 
     def find_max_two_scoops(self, top_layer, curr_level, flavor_preference, max_scoop_size, flavors_left):
         max_scoops = {}
@@ -114,23 +114,27 @@ class Player:
         max_scoop_limit = 0
         expected_value = self.calculate_expected_value_of_unk(flavors_left, self.flavor_preference)
         for scoop_limit in range(1, min(5, max_scoop_size+1)):
-            first_scoop_loc, first_scoop_points, first_scoop_units = self.find_max_scoop(top_layer, curr_level, flavor_preference, scoop_limit, divide_by_scoop_size=True)
+            first_scoop_loc, first_scoop_points, first_scoop_units = self.find_max_scoop(top_layer, curr_level, flavor_preference, scoop_limit,
+                                                                                         divide_by_scoop_size=False, fixed_scoop_size=scoop_limit)
+            if first_scoop_points == 0:
+                continue
+
             top_layer_copy = np.copy(top_layer)
             curr_level_copy = np.copy(curr_level)
             self.simulate_scoop(top_layer_copy, curr_level_copy, expected_value, first_scoop_loc)
 
             second_scoop_loc, second_scoop_points, second_scoop_units = self.find_max_scoop(top_layer_copy, curr_level_copy, flavor_preference,
-                                                                        scoop_limit - first_scoop_units, divide_by_scoop_size=True)
+                                                                        max_scoop_size - first_scoop_units, divide_by_scoop_size=True)
             total_both_scoops = first_scoop_points + second_scoop_points
             max_scoops[scoop_limit] = total_both_scoops / (first_scoop_units + second_scoop_units)
 
-            if max_scoops[scoop_limit] > max_two_scoop:
-                max_two_scoop = total_both_scoops
+            if max_scoops[scoop_limit] >= max_two_scoop:
+                max_two_scoop = max_scoops[scoop_limit]
                 max_scoop_limit = scoop_limit
         return self.find_max_scoop(top_layer, curr_level, flavor_preference,
-                                    max_scoop_limit, divide_by_scoop_size=True)
+                                    max_scoop_limit, divide_by_scoop_size=True, fixed_scoop_size=max_scoop_limit)
 
-    def find_max_scoop(self, top_layer, curr_level, flavor_preference, max_scoop_size, divide_by_scoop_size=True):
+    def find_max_scoop(self, top_layer, curr_level, flavor_preference, max_scoop_size, divide_by_scoop_size=True, fixed_scoop_size=0):
         max_scoop_loc = (0, 0)
         max_scoop_points_per_unit = 0
         max_scoop_points = 0
@@ -139,6 +143,10 @@ class Player:
             for j in range(len(top_layer[0]) - 1):
                 scoop_points, scoop_size = self.calc_scoop_points(i, j, curr_level, top_layer, flavor_preference)
                 if 0 < scoop_size <= max_scoop_size:
+
+                    if fixed_scoop_size != 0 and scoop_size != fixed_scoop_size:
+                        continue
+
                     if divide_by_scoop_size:
                         scoop_points_per_unit = round_score(scoop_points / scoop_size)
 
@@ -263,7 +271,7 @@ class Player:
             #print("top layer was :", self.get_top_layer_flavour_count(top_layer))
         else:
             action = "scoop"
-            if self.num_units_in_turn <=16:
+            if self.num_units_in_turn <=19:
                 values, points, units = self.find_max_scoop(top_layer, curr_level, self.flavor_preference, 24 - self.num_units_in_turn, divide_by_scoop_size=True)
             else:
                 values, points, units = self.find_max_two_scoops(top_layer, curr_level, self.flavor_preference,
